@@ -1,0 +1,439 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Custom table, Data Collection Endpoint and Data Collection Rule for the platform's Microsoft Sentinel connector (Logs Ingestion API). Deploy into the resource group of the Sentinel Log Analytics workspace."
+  },
+  "parameters": {
+    "workspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Existing Log Analytics workspace with Microsoft Sentinel enabled (same resource group)."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Region of the workspace. The DCE and DCR must be in the same region."
+      }
+    },
+    "dataCollectionEndpointName": {
+      "type": "string",
+      "defaultValue": "device-security-dce"
+    },
+    "dataCollectionRuleName": {
+      "type": "string",
+      "defaultValue": "device-security-dcr"
+    },
+    "retentionInDays": {
+      "type": "int",
+      "defaultValue": 90,
+      "minValue": 4,
+      "maxValue": 730,
+      "metadata": {
+        "description": "Interactive retention for the DeviceSecurity_CL table."
+      }
+    },
+    "servicePrincipalObjectId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional. Object id of the Entra app registration's service principal (Enterprise applications, not the app registration). When set, it is granted Monitoring Metrics Publisher on the DCR."
+      }
+    }
+  },
+  "variables": {
+    "tableName": "DeviceSecurity_CL",
+    "streamName": "Custom-DeviceSecurity_CL",
+    "monitoringMetricsPublisherRoleId": "3913510d-42f4-4e42-8a64-420c390055eb",
+    "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[format('{0}/{1}', parameters('workspaceName'), variables('tableName'))]",
+      "properties": {
+        "plan": "Analytics",
+        "retentionInDays": "[parameters('retentionInDays')]",
+        "schema": {
+          "name": "[variables('tableName')]",
+          "description": "Device security, vulnerability and audit events from the platform, OCSF shaped.",
+          "columns": [
+            {
+              "name": "TimeGenerated",
+              "type": "datetime",
+              "description": "Event time (OCSF time), ingestion time when absent"
+            },
+            {
+              "name": "EventType",
+              "type": "string",
+              "description": "Platform event: score_changed, vulnerability_found, vulnerability_resolved, impersonation_started, ..."
+            },
+            {
+              "name": "SourceTenant",
+              "type": "string",
+              "description": "Platform tenant id"
+            },
+            {
+              "name": "ClassUid",
+              "type": "int",
+              "description": "OCSF class_uid: 5001 device inventory, 2002 vulnerability finding, 3002 authentication, 6002 audit activity"
+            },
+            {
+              "name": "ClassName",
+              "type": "string",
+              "description": "OCSF class_name"
+            },
+            {
+              "name": "CategoryUid",
+              "type": "int",
+              "description": "OCSF category_uid"
+            },
+            {
+              "name": "ActivityId",
+              "type": "int",
+              "description": "OCSF activity_id"
+            },
+            {
+              "name": "ActivityName",
+              "type": "string",
+              "description": "OCSF activity_name"
+            },
+            {
+              "name": "SeverityId",
+              "type": "int",
+              "description": "OCSF severity_id: 5 Critical, 4 High, 3 Medium, 2 Low, 0 Unknown"
+            },
+            {
+              "name": "Status",
+              "type": "string",
+              "description": "OCSF status"
+            },
+            {
+              "name": "Message",
+              "type": "string",
+              "description": "OCSF message"
+            },
+            {
+              "name": "Comment",
+              "type": "string",
+              "description": "Finding comment"
+            },
+            {
+              "name": "DeviceUid",
+              "type": "string",
+              "description": "Device id"
+            },
+            {
+              "name": "DeviceHostname",
+              "type": "string",
+              "description": "Device hostname"
+            },
+            {
+              "name": "DeviceIp",
+              "type": "string",
+              "description": "Device IP address"
+            },
+            {
+              "name": "DeviceMac",
+              "type": "string",
+              "description": "Device MAC address"
+            },
+            {
+              "name": "DeviceRiskScore",
+              "type": "real",
+              "description": "Device security score"
+            },
+            {
+              "name": "DeviceFirstSeen",
+              "type": "datetime",
+              "description": "When the device was first seen"
+            },
+            {
+              "name": "DeviceGroups",
+              "type": "dynamic",
+              "description": "Zero trust statuses: [{uid, name, type}]"
+            },
+            {
+              "name": "CveId",
+              "type": "string",
+              "description": "CVE id of the finding"
+            },
+            {
+              "name": "CvssScore",
+              "type": "real",
+              "description": "CVSS base score of the finding"
+            },
+            {
+              "name": "IsExploitAvailable",
+              "type": "boolean",
+              "description": "CVE is on the CISA Known Exploited Vulnerabilities list"
+            },
+            {
+              "name": "FindingUid",
+              "type": "string",
+              "description": "Finding id"
+            },
+            {
+              "name": "AuthProtocol",
+              "type": "string",
+              "description": "OCSF auth_protocol"
+            },
+            {
+              "name": "IsMfa",
+              "type": "boolean",
+              "description": "OCSF is_mfa"
+            },
+            {
+              "name": "LogonType",
+              "type": "string",
+              "description": "OCSF logon_type"
+            },
+            {
+              "name": "ActorUserName",
+              "type": "string",
+              "description": "Acting user"
+            },
+            {
+              "name": "UserEmail",
+              "type": "string",
+              "description": "Target user email"
+            },
+            {
+              "name": "SrcIp",
+              "type": "string",
+              "description": "Source IP"
+            },
+            {
+              "name": "Device",
+              "type": "dynamic",
+              "description": "OCSF device object"
+            },
+            {
+              "name": "Vulnerabilities",
+              "type": "dynamic",
+              "description": "OCSF vulnerabilities array"
+            },
+            {
+              "name": "FindingInfo",
+              "type": "dynamic",
+              "description": "OCSF finding_info object"
+            },
+            {
+              "name": "Actor",
+              "type": "dynamic",
+              "description": "OCSF actor object"
+            },
+            {
+              "name": "User",
+              "type": "dynamic",
+              "description": "OCSF user object"
+            },
+            {
+              "name": "SrcEndpoint",
+              "type": "dynamic",
+              "description": "OCSF src_endpoint object"
+            },
+            {
+              "name": "Session",
+              "type": "dynamic",
+              "description": "OCSF session object"
+            },
+            {
+              "name": "HttpRequest",
+              "type": "dynamic",
+              "description": "OCSF http_request object"
+            },
+            {
+              "name": "Unmapped",
+              "type": "dynamic",
+              "description": "OCSF unmapped object"
+            },
+            {
+              "name": "Metadata",
+              "type": "dynamic",
+              "description": "OCSF metadata object"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionEndpoints",
+      "apiVersion": "2023-03-11",
+      "name": "[parameters('dataCollectionEndpointName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "networkAcls": {
+          "publicNetworkAccess": "Enabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[parameters('dataCollectionRuleName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dataCollectionEndpointName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('workspaceName'), variables('tableName'))]"
+      ],
+      "properties": {
+        "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dataCollectionEndpointName'))]",
+        "streamDeclarations": {
+          "[variables('streamName')]": {
+            "columns": [
+              {
+                "name": "time",
+                "type": "long"
+              },
+              {
+                "name": "class_uid",
+                "type": "int"
+              },
+              {
+                "name": "class_name",
+                "type": "string"
+              },
+              {
+                "name": "category_uid",
+                "type": "int"
+              },
+              {
+                "name": "activity_id",
+                "type": "int"
+              },
+              {
+                "name": "activity_name",
+                "type": "string"
+              },
+              {
+                "name": "severity_id",
+                "type": "int"
+              },
+              {
+                "name": "status",
+                "type": "string"
+              },
+              {
+                "name": "status_id",
+                "type": "int"
+              },
+              {
+                "name": "message",
+                "type": "string"
+              },
+              {
+                "name": "comment",
+                "type": "string"
+              },
+              {
+                "name": "auth_protocol",
+                "type": "string"
+              },
+              {
+                "name": "is_mfa",
+                "type": "boolean"
+              },
+              {
+                "name": "logon_type",
+                "type": "string"
+              },
+              {
+                "name": "device",
+                "type": "dynamic"
+              },
+              {
+                "name": "vulnerabilities",
+                "type": "dynamic"
+              },
+              {
+                "name": "finding_info",
+                "type": "dynamic"
+              },
+              {
+                "name": "actor",
+                "type": "dynamic"
+              },
+              {
+                "name": "user",
+                "type": "dynamic"
+              },
+              {
+                "name": "src_endpoint",
+                "type": "dynamic"
+              },
+              {
+                "name": "session",
+                "type": "dynamic"
+              },
+              {
+                "name": "http_request",
+                "type": "dynamic"
+              },
+              {
+                "name": "unmapped",
+                "type": "dynamic"
+              },
+              {
+                "name": "metadata",
+                "type": "dynamic"
+              }
+            ]
+          }
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "workspaceResourceId": "[variables('workspaceId')]",
+              "name": "sentinelWorkspace"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "[variables('streamName')]"
+            ],
+            "destinations": [
+              "sentinelWorkspace"
+            ],
+            "transformKql": "source | extend TimeGenerated = iif(isnull(['time']), now(), unixtime_seconds_todatetime(['time'])) | extend EventType = tostring(metadata.event_code), SourceTenant = tostring(metadata.tenant_uid) | extend DeviceUid = tostring(device.uid), DeviceHostname = tostring(device.hostname), DeviceIp = tostring(device.ip), DeviceMac = tostring(device.mac), DeviceRiskScore = toreal(device.risk_score), DeviceFirstSeen = unixtime_seconds_todatetime(tolong(device.first_seen_time)), DeviceGroups = device.groups | extend CveId = tostring(vulnerabilities[0].cve.uid), CvssScore = toreal(vulnerabilities[0].severity), IsExploitAvailable = tobool(vulnerabilities[0].is_exploit_available), FindingUid = tostring(finding_info.uid) | extend ActorUserName = tostring(actor.user.name), UserEmail = tostring(['user'].email_addr), SrcIp = tostring(src_endpoint.ip) | project TimeGenerated, EventType, SourceTenant, ClassUid = class_uid, ClassName = class_name, CategoryUid = category_uid, ActivityId = activity_id, ActivityName = activity_name, SeverityId = severity_id, Status = status, Message = message, Comment = comment, DeviceUid, DeviceHostname, DeviceIp, DeviceMac, DeviceRiskScore, DeviceFirstSeen, DeviceGroups, CveId, CvssScore, IsExploitAvailable, FindingUid, AuthProtocol = auth_protocol, IsMfa = is_mfa, LogonType = logon_type, ActorUserName, UserEmail, SrcIp, Device = device, Vulnerabilities = vulnerabilities, FindingInfo = finding_info, Actor = actor, User = ['user'], SrcEndpoint = src_endpoint, Session = session, HttpRequest = http_request, Unmapped = unmapped, Metadata = metadata",
+            "outputStream": "[variables('streamName')]"
+          }
+        ]
+      }
+    },
+    {
+      "condition": "[not(empty(parameters('servicePrincipalObjectId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.Insights/dataCollectionRules/{0}', parameters('dataCollectionRuleName'))]",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('servicePrincipalObjectId'), variables('monitoringMetricsPublisherRoleId'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringMetricsPublisherRoleId'))]",
+        "principalId": "[parameters('servicePrincipalObjectId')]",
+        "principalType": "ServicePrincipal"
+      }
+    }
+  ],
+  "outputs": {
+    "dataCollectionEndpointUri": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dataCollectionEndpointName')), '2023-03-11').logsIngestion.endpoint]"
+    },
+    "dataCollectionRuleImmutableId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), '2023-03-11').immutableId]"
+    },
+    "streamName": {
+      "type": "string",
+      "value": "[variables('streamName')]"
+    }
+  }
+}

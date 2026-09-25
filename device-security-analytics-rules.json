@@ -1,0 +1,150 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Scheduled analytics rules over the platform's DeviceSecurity_CL table in Microsoft Sentinel."
+  },
+  "parameters": {
+    "workspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Log Analytics workspace with Microsoft Sentinel and the DeviceSecurity_CL table (same resource group)."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.SecurityInsights/alertRules",
+      "apiVersion": "2023-02-01",
+      "scope": "[format('Microsoft.OperationalInsights/workspaces/{0}', parameters('workspaceName'))]",
+      "name": "[guid(resourceGroup().id, parameters('workspaceName'), 'device-security-critical-vuln-quarantined')]",
+      "kind": "Scheduled",
+      "properties": {
+        "displayName": "Critical vulnerability on a quarantined device",
+        "description": "An open critical (CVSS 9.0+) vulnerability finding exists on a device whose zero trust status is Quarantined. Fires when the finding or the device state was reported in the last hour. Matches the default status name \"Quarantined\"; edit the query if the tenant renamed it.",
+        "severity": "High",
+        "enabled": true,
+        "query": "let recent = 1h;\nlet lookback = 14d;\nlet quarantined = DeviceSecurity_CL\n    | where TimeGenerated > ago(lookback) and isnotempty(DeviceUid)\n    | summarize arg_max(TimeGenerated, DeviceGroups, DeviceHostname, DeviceIp) by SourceTenant, DeviceUid\n    | where tostring(DeviceGroups) has \"Quarantined\"\n    | project DeviceSeen = TimeGenerated, SourceTenant, DeviceUid, DeviceHostname, DeviceIp;\nDeviceSecurity_CL\n| where TimeGenerated > ago(lookback) and ClassUid == 2002\n| summarize arg_max(TimeGenerated, Status, SeverityId, CveId, CvssScore, IsExploitAvailable) by SourceTenant, FindingUid, DeviceUid\n| where Status !in (\"Resolved\", \"Suppressed\") and SeverityId == 5\n| join kind=inner quarantined on SourceTenant, DeviceUid\n| where TimeGenerated > ago(recent) or DeviceSeen > ago(recent)\n| project TimeGenerated, SourceTenant, DeviceUid, DeviceHostname, DeviceIp, CveId, CvssScore, IsExploitAvailable, FindingUid",
+        "queryFrequency": "PT1H",
+        "queryPeriod": "P14D",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "tactics": [
+          "InitialAccess",
+          "LateralMovement"
+        ],
+        "entityMappings": [
+          {
+            "entityType": "Host",
+            "fieldMappings": [
+              {
+                "identifier": "HostName",
+                "columnName": "DeviceHostname"
+              }
+            ]
+          },
+          {
+            "entityType": "IP",
+            "fieldMappings": [
+              {
+                "identifier": "Address",
+                "columnName": "DeviceIp"
+              }
+            ]
+          }
+        ],
+        "customDetails": {
+          "CveId": "CveId",
+          "CvssScore": "CvssScore",
+          "Tenant": "SourceTenant"
+        },
+        "alertDetailsOverride": {
+          "alertDisplayNameFormat": "Critical {{CveId}} on quarantined device {{DeviceHostname}}"
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "AlertPerResult"
+        },
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": true,
+            "reopenClosedIncident": false,
+            "lookbackDuration": "P1D",
+            "matchingMethod": "AllEntities",
+            "groupByEntities": [],
+            "groupByAlertDetails": [],
+            "groupByCustomDetails": []
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.SecurityInsights/alertRules",
+      "apiVersion": "2023-02-01",
+      "scope": "[format('Microsoft.OperationalInsights/workspaces/{0}', parameters('workspaceName'))]",
+      "name": "[guid(resourceGroup().id, parameters('workspaceName'), 'device-security-new-device-known-exploit')]",
+      "kind": "Scheduled",
+      "properties": {
+        "displayName": "New device with a known exploited vulnerability",
+        "description": "A device first seen in the last 24 hours has an open vulnerability listed in the CISA Known Exploited Vulnerabilities catalogue.",
+        "severity": "Medium",
+        "enabled": true,
+        "query": "DeviceSecurity_CL\n| where TimeGenerated > ago(1h) and ClassUid == 2002\n| where IsExploitAvailable == true and Status !in (\"Resolved\", \"Suppressed\")\n| where DeviceFirstSeen > ago(1d)\n| summarize arg_max(TimeGenerated, DeviceHostname, DeviceIp, DeviceFirstSeen, CvssScore, SeverityId, FindingUid) by SourceTenant, DeviceUid, CveId\n| project TimeGenerated, SourceTenant, DeviceUid, DeviceHostname, DeviceIp, DeviceFirstSeen, CveId, CvssScore, FindingUid",
+        "queryFrequency": "PT1H",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionDuration": "PT1H",
+        "suppressionEnabled": false,
+        "tactics": [
+          "InitialAccess"
+        ],
+        "entityMappings": [
+          {
+            "entityType": "Host",
+            "fieldMappings": [
+              {
+                "identifier": "HostName",
+                "columnName": "DeviceHostname"
+              }
+            ]
+          },
+          {
+            "entityType": "IP",
+            "fieldMappings": [
+              {
+                "identifier": "Address",
+                "columnName": "DeviceIp"
+              }
+            ]
+          }
+        ],
+        "customDetails": {
+          "CveId": "CveId",
+          "FirstSeen": "DeviceFirstSeen",
+          "Tenant": "SourceTenant"
+        },
+        "alertDetailsOverride": {
+          "alertDisplayNameFormat": "New device {{DeviceHostname}} has known exploited {{CveId}}"
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "AlertPerResult"
+        },
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": true,
+            "reopenClosedIncident": false,
+            "lookbackDuration": "P1D",
+            "matchingMethod": "AllEntities",
+            "groupByEntities": [],
+            "groupByAlertDetails": [],
+            "groupByCustomDetails": []
+          }
+        }
+      }
+    }
+  ]
+}
